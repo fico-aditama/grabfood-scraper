@@ -32,13 +32,22 @@ captured_data = {}
 
 async def handle_response(response):
     """Capture the merchant API response that contains menu data."""
-    if "merchant/get" in response.url and MERCHANT_ID in response.url:
+    url = response.url
+    if MERCHANT_ID in url and ("merchant" in url or "merchants" in url or "get" in url):
+        # Filter out images/static assets
+        if "json" not in response.headers.get("content-type", "") and not url.endswith((".json", ".graphql")):
+            # Fallback if content-type isn't parsed yet
+            if any(ext in url for ext in [".jpg", ".png", ".webp", ".css", ".js", ".woff"]):
+                return
+                
         try:
             body = await response.json()
-            captured_data["merchant"] = body
-            print(f"[✓] Captured API response from: {response.url[:80]}...")
-        except Exception as e:
-            print(f"[!] Could not parse response: {e}")
+            # Verify it actually has merchant data
+            if "merchant" in body or ("data" in body and "merchant" in body["data"]):
+                captured_data["merchant"] = body
+                print(f"[✓] Captured API response from: {url[:80]}...")
+        except Exception:
+            pass
 
 
 async def scrape():
@@ -82,19 +91,18 @@ def parse_menu(raw: dict) -> list[dict]:
     """
     rows = []
 
+    # Debug dump to see the schema
+    with open("grab_api_debug.json", "w") as f:
+        json.dump(raw, f, indent=2)
+
     # Try common paths
-    menu_root = (
-        raw.get("data", {}).get("menu", {})
-        or raw.get("menu", {})
-        or raw
-    )
-
-    outlet_name = (
-        raw.get("data", {}).get("merchant", {}).get("name")
-        or raw.get("merchant", {}).get("name", "Ayam Katsu Katsunami - Lokarasa Citraland")
-    )
-
-    sections = menu_root.get("sections", [])
+    merchant_data = raw.get("merchant", raw)
+    
+    outlet_name = merchant_data.get("name", "Ayam Katsu Katsunami - Lokarasa Citraland")
+    
+    menu_root = merchant_data.get("menu", raw)
+    
+    sections = menu_root.get("categories", menu_root.get("sections", []))
     if not sections:
         # fallback: look for any key that holds a list
         for v in menu_root.values():
@@ -107,27 +115,28 @@ def parse_menu(raw: dict) -> list[dict]:
         items    = section.get("items", [])
 
         for item in items:
+            name = item.get("name", "")
+            description = item.get("description", "")
+            
             # ── prices ──────────────────────────────────────────
-            prices    = item.get("prices", [{}])
-            price_obj = prices[0] if prices else {}
+            price_before = 0
+            price_after = 0
+            promo_label = "-"
 
-            price_before = price_obj.get("price", 0) / 100          # Grab stores in cents
-            discounts    = price_obj.get("discounts", [])
-            discount_obj = discounts[0] if discounts else {}
-
-            if discount_obj:
-                promo_type = discount_obj.get("type", "")            # "FLAT" or "PERCENTAGE"
-                promo_val  = discount_obj.get("discount", 0)
-                if promo_type == "PERCENTAGE":
-                    price_after = price_before * (1 - promo_val / 100)
-                    promo_label = f"{int(promo_val)}% OFF"
-                else:
-                    promo_raw   = promo_val / 100
-                    price_after = price_before - promo_raw
-                    promo_label = f"Rp {int(promo_raw):,} OFF"
+            # Original price
+            if "priceInMinorUnit" in item:
+                price_before = item.get("priceInMinorUnit", 0) / 100
+                
+            # Promos
+            if "discountedPriceInMin" in item:
+                price_after = item.get("discountedPriceInMin", 0) / 100
+                
+                # Check for promo label
+                promo_label = item.get("discountPercentage") or item.get("campaignName") or "Promo"
+                if not promo_label and price_before > price_after:
+                    promo_label = f"Rp {int(price_before - price_after):,} OFF"
             else:
                 price_after = price_before
-                promo_label = "-"
 
             # ── availability ─────────────────────────────────────
             available_raw = item.get("available", True)
@@ -136,8 +145,8 @@ def parse_menu(raw: dict) -> list[dict]:
             rows.append({
                 "outlet":       outlet_name,
                 "category":     category,
-                "name":         item.get("name", ""),
-                "description":  item.get("description", ""),
+                "name":         name,
+                "description":  description,
                 "price_before": int(price_before),
                 "price_after":  int(price_after),
                 "promo":        promo_label,
