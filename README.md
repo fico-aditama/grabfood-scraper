@@ -14,11 +14,11 @@ GrabFood adalah React SPA — konten di-render via JavaScript, sehingga pendekat
 
 1. Buka halaman dengan Playwright (headless Chromium)
 2. Pasang listener `page.on("response", ...)` untuk intercept semua network request
-3. Tangkap response dari endpoint internal Grab: `GET /v5/merchant/get?merchantID=...`
+3. Tangkap response dari endpoint internal Grab: `GET .../foodweb/guest/v2/merchants/...`
 4. Parse JSON response → ekstrak data menu
-5. Export ke `.xlsx` via `openpyxl`
+5. Export ke `.xlsx` menggunakan `openpyxl`
 
-```
+```text
 Browser (Playwright) → Load Page → JS Fires → Grab API Called → Response Captured → Parse JSON → Excel
 ```
 
@@ -26,16 +26,16 @@ Browser (Playwright) → Load Page → JS Fires → Grab API Called → Response
 
 ## Data yang diambil
 
-| Field | Sumber |
-|---|---|
-| Nama outlet | `data.merchant.name` |
-| Nama kategori | `data.menu.sections[].name` |
-| Nama menu | `sections[].items[].name` |
-| Deskripsi menu | `sections[].items[].description` |
-| Harga sebelum promo | `items[].prices[0].price` (÷100) |
-| Harga setelah promo | Kalkulasi dari `prices[0].discounts[0]` |
-| Nominal/persentase promo | `discounts[0].type` + `discounts[0].discount` |
-| Ketersediaan | `items[].available` |
+| Field                     | Sumber di Internal API Grab |
+| ------------------------- | --------------------------- |
+| Nama outlet               | `merchant.name` |
+| Nama kategori             | `merchant.menu.categories[].name` |
+| Nama menu                 | `categories[].items[].name` |
+| Deskripsi menu            | `categories[].items[].description` |
+| Harga sebelum promo       | `items[].priceInMinorUnit` (dibagi 100) |
+| Harga setelah promo       | `items[].discountedPriceInMin` (dibagi 100) |
+| Nominal/persentase promo  | `items[].campaignName` / kalkulasi selisih harga |
+| Ketersediaan              | `items[].available` (boolean) |
 
 ---
 
